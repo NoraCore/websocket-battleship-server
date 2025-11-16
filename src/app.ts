@@ -1,17 +1,19 @@
-import { WebSocketServer } from 'ws';
+import { WsServer } from "./server/ws.js";
 
-const wss = new WebSocketServer({ port: 8080 });
+const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "0.0.0.0";
 
+const server = new WsServer(PORT, HOST);
 
-wss.on('connection', (ws) => {
-  console.log('Новый клиент подключился!');
+// on SIGINT/SIGTERM graceful shutdown
+process.on("SIGINT", async () => {
+  console.log("SIGINT received, shutting down");
+  server.close();
+  process.exit(0);
+});
 
-  ws.on('message', (message) => {
-    console.log(`Получено сообщение: ${message}`);
-    ws.send('Сообщение получено!');
-  });
-
-  ws.on('close', () => {
-    console.log('Клиент отключился');
-  });
+process.on("SIGTERM", async () => {
+  console.log("SIGTERM received, shutting down");
+  server.close();
+  process.exit(0);
 });
