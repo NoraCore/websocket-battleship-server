@@ -2,7 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import {newId, sendJson} from "./serverUtils.js";
 import {Room} from "../game/game.js";
 import {login, register} from "../game/playerLogic.js";
-import {findPlayerByLogin} from "../models/models.js";
+import {findPlayerByLogin, players, type RoomRecord, rooms} from "../models/models.js";
 
 const roomsRuntime = new Map(); // roomId -> Room instance
 export class WsServer {
@@ -18,7 +18,6 @@ export class WsServer {
 
     console.log(`WebSocket server started on ws://${this.host}:${this.port}`);
   }
-
 
   onConnection(ws: WebSocket, req: any) {
     console.log("new connection");
@@ -58,6 +57,7 @@ export class WsServer {
     console.log("COMMAND:", { type, data, id });
     let payload = JSON.parse(data);
     switch (type) {
+      /* -------------------- Player registration/login -------------------- */
       case "reg":
         const { name, password } = payload || {};
         const p = register(name, password);
@@ -123,12 +123,9 @@ export class WsServer {
           console.log("RESULT: registered", playerRec.id);
           return;
         } catch (e: any) {
-          sendJson(ws, {type: "reg", data: {
-
-            }
-            ,id:0}, )
           sendJson(ws, {
-            type: "reg", data: { name: name,
+            type: "reg", data: {
+              name: name,
               index: null,
               error: true,
               errorText: e.message || "Register failed" }, id: 0
@@ -136,125 +133,185 @@ export class WsServer {
           console.log("RESULT: register error", e.message);
           return;
         }
-      case "update_winners":
-        break;
+      /* -------------------- Create room -------------------- */
+      case "create_room": {
+        const pid = (ws as any).context.playerId;
+        if (!pid) throw new Error("Not authenticated");
+        const roomId = newId();
+        const rec = { id: roomId, players: [pid], state: "waiting" } as RoomRecord;
+        rooms.set(roomId, rec);
+        const r = new Room(rec);
+        r.addPlayer(pid, ws);
+        roomsRuntime.set(roomId, r);
 
-      case "create_room":
-        break;
+        // Respond to creator with create_game (as spec says "create_game" will be sent for both players after they connect;
+        // here for the creating player we send create_game immediately with its idPlayer)
+        sendJson(ws,  {
+          type: "create_room",
+          data: "",
+          id: 0
+        });
+        console.log("RESULT: room created", roomId);
+        // Also broadcast updated rooms list to all connected clients (update_room).
+        this.broadcastRoomsList();
+        return;
+      }
 
-      case "add_user_to_room":
-        break;
+      /* -------------------- Add user to room (join) -------------------- */
+      case "add_user_to_room": {
+        // payload: { indexRoom: roomId }
+        const pid = (ws as any).context.playerId;
+        if (!pid) throw new Error("Not authenticated");
+        const roomId = payload?.indexRoom;
+        if (!roomId) throw new Error("Missing indexRoom");
+        const rec = rooms.get(roomId);
+        if (!rec) throw new Error("Room not found");
+        let r = roomsRuntime.get(roomId);
+        if (!r) {
+          r = new Room(rec);
+          roomsRuntime.set(roomId, r);
+        }
+        r.addPlayer(pid, ws);
 
-      case "create_game":
-        break;
+        // If room has 2 players now — send create_game to both with per-player idPlayer (use server player ids)
+        if (rec.players.length === 2) {
+          // send create_game to each player in room
+          for (const playerId of rec.players) {
+            const playerWs = (players.get(playerId) as any)?.ws ?? r.sockets.get(playerId);
+            if (playerWs) {
+              sendJson(playerWs,
+                {
+                  type: "create_game",
+                  data: {idGame: roomId, idPlayer: playerId},
+                  id: 0
+                }
+              );
+            }
+          }
+          console.log("RESULT: both players in room -> create_game sent for room", roomId);
+        } else {
+          console.log("RESULT: joined (waiting for opponent)", roomId);
+        }
 
-      case "update_room":
-        break;
+        // reply to joining client with generic joined ack
+        sendJson(ws, {
+          type: "create_game",
+          data: {idGame: roomId, idPlayer: pid},
+          id: 0
+        });
+        // and broadcast updated rooms list
+        this.broadcastRoomsList();
+        return;
+      }
 
-      case "add_ships":
-        break;
+      /* -------------------- Add ships -------------------- */
+      case "add_ships": {
+        // payload: { gameId, ships: [ { position:{x,y}, direction: boolean, length, type } ], indexPlayer }
+        const pid = (ws as any).context.playerId;
+        if (!pid) {
+          throw new Error("Not authenticated");
+        }
+        const { gameId, ships: clientShips, indexPlayer } = payload || {};
+        if (!gameId || !clientShips) {
+          throw new Error("Missing gameId or ships");
+        }
+        const r = roomsRuntime.get(gameId);
+        if (!r) {
+          throw new Error("Room not found");
+        }
+        // convert ships to internal coords
+        const expanded = null // expandClientShips(clientShips);
+        // store ships in room (Room.receiveShips expects arrays of coords)
+        r.receiveShips(indexPlayer ?? pid, expanded);
+        // server will start the game automatically when both players submitted ships (Room.startGameIfReady)
+        console.log("RESULT: ships received for game", gameId, "player", indexPlayer ?? pid);
+        return;
+      }
 
-      case "start_game":
-        break;
+      /* -------------------- Attack -------------------- */
+      case "attack": {
+        // payload: { gameId, x, y, indexPlayer }
+        const pid = (ws as any).context.playerId;
+        if (!pid) throw new Error("Not authenticated");
+        const { gameId, x, y, indexPlayer } = payload || {};
+        if (!gameId || typeof x !== "number" || typeof y !== "number") {
+          throw new Error("Missing attack params");
+        }
+        const r = roomsRuntime.get(gameId);
+        if (!r) {
+          throw new Error("Room not found");
+        }
+        // Defensive: ensure indexPlayer matches player's server id (or allow provided indexPlayer)
+        const fromId = indexPlayer ?? pid;
+        r.attack(fromId, { x, y });
 
-      case "attack":
-        break;
+        // Room.attack broadcasts the attack result (attack event) and turn/finish/update_winners as implemented.
+        console.log("RESULT: attack processed", { gameId, x, y, by: fromId });
+        return;
+      }
 
-      case "randomAttack":
-        break;
+      /* -------------------- Random attack -------------------- */
+      case "randomAttack": {
+        // payload: { gameId, indexPlayer }
+        const pid = (ws as any).context.playerId;
+        if (!pid) {
+          throw new Error("Not authenticated");
+        }
+        const { gameId, indexPlayer } = payload || {};
+        if (!gameId) {
+          throw new Error("Missing gameId");
+        }
+        const r: Room | undefined = roomsRuntime.get(gameId);
+        if (!r) {
+          throw new Error("Room not found");
+        }
 
-      case "turn":
-        break;
+        // Build set of previously tried coords (from room state if available)
+        const tried = new Set<string>();
+        if (r.game && r.game.hits) {
+          for (const arr of Object.values(r.game.hits)) {
+            for (const c of arr) tried.add(`${c.x},${c.y}`);
+          }
+        }
+        // naive random pick with safety limit
+        let attempts = 0;
+        let picked = null as null | { x: number; y: number };
+        while (attempts < 500 && !picked) {
+          const x = Math.floor(Math.random() * 10);
+          const y = Math.floor(Math.random() * 10);
+          if (!tried.has(`${x},${y}`)) picked = { x, y };
+          attempts++;
+        }
+        if (!picked) throw new Error("Unable to generate random attack");
+        const fromId = indexPlayer ?? pid;
+        r.attack(fromId, picked);
+        console.log("RESULT: random attack processed", { gameId, coord: picked, by: fromId });
+        return;
+      }
 
-      default:
-          break;
-
+      /* -------------------- Unknown command fallback -------------------- */
+      default: {
+        console.log("RESULT: Unknown command");
+        return;
+      }
     }
-    // switch (type) {
-    //   case "reg":
-    //     if (action === "register") {
-    //       const { login, password } = payload;
-    //       const p = register(login, password);
-    //       (ws as any).context.playerId = p.id;
-    //       p.ws = ws;
-    //       sendJson(ws, { category:"personal", event:"reg", payload:{ playerId: p.id }, requestId });
-    //       console.log("RESULT: registered", p.id);
-    //       return;
-    //     }
-    //     if (action === "login") {
-    //       const { login: lg, password } = payload;
-    //       const p = login(lg, password);
-    //       (ws as any).context.playerId = p.id;
-    //       p.ws = ws;
-    //       sendJson(ws, { category:"personal", event:"reg", payload:{ playerId: p.id }, requestId });
-    //       console.log("RESULT: logged in", p.id);
-    //       return;
-    //     }
-    //
-    //   case "rooms":
-    //     if (action === "create") {
-    //       const pid = (ws as any).context.playerId;
-    //       if (!pid) throw new Error("Not authenticated");
-    //       const roomId = newId();
-    //       const rec = { id: roomId, players: [pid], state: "waiting" };
-    //       rooms.set(roomId, rec as RoomRecord);
-    //       const r = new Room(rec);
-    //       r.addPlayer(pid, ws);
-    //       roomsRuntime.set(roomId, r);
-    //       sendJson(ws, { category:"personal", event:"create_game", payload:{ gameId: roomId, playerId: pid }, requestId });
-    //       console.log("RESULT: room created", roomId);
-    //       return;
-    //     }
-    //     if (action === "join") {
-    //       const pid = (ws as any).context.playerId;
-    //       if (!pid) throw new Error("Not authenticated");
-    //       const { roomId } = payload;
-    //       const rec = rooms.get(roomId);
-    //       if (!rec) throw new Error("Room not found");
-    //       let r = roomsRuntime.get(roomId);
-    //       if (!r) {
-    //         r = new Room(rec);
-    //         roomsRuntime.set(roomId, r);
-    //       }
-    //       r.addPlayer(pid, ws);
-    //       sendJson(ws, { category:"personal", event:"joined", payload:{ roomId }, requestId });
-    //       console.log("RESULT: joined", roomId);
-    //       return;
-    //     }
-    //
-    //   case "ships":
-    //     // payload: {roomId, ships}
-    //     const pid = (ws as any).context.playerId;
-    //     if (!pid) {
-    //       throw new Error("Not authenticated");
-    //     }
-    //     const { roomId, ships } = payload;
-    //     const r = roomsRuntime.get(roomId);
-    //     if (!r) {
-    //       throw new Error("Room not found");
-    //     }
-    //     r.receiveShips(pid, ships);
-    //     console.log("RESULT: ships received");
-    //     return;
-    //
-    //
-    //   case "game":
-    //     const pid1 = (ws as any).context.playerId;
-    //     if (!pid1) throw new Error("Not authenticated");
-    //     if (action === "attack") {
-    //       const { roomId, coord } = payload;
-    //       const r = roomsRuntime.get(roomId);
-    //       if (!r) throw new Error("Room not found");
-    //       r.attack(pid1, coord);
-    //       console.log("RESULT: attack processed");
-    //       return;
-    //     }
-    //
-    //   default:
-    //     sendJson(ws, { category:"personal", event:"error", payload:{ msg:"Unknown command" }, requestId });
-    //     console.log("RESULT: Unknown command");
-    //     break;
-    // }
+  }
+  /* -------------------- small helper: broadcastRoomsList (attach to server object) -------------------- */
+  /* call this whenever rooms list changes to send 'update_room' to all connected ws clients */
+  private broadcastRoomsList() {
+    const list = Array.from(rooms.values()).map((r) => ({
+      roomId: r.id,
+      roomUsers: r.players.map((pid: string) => {
+        const p = players.get(pid);
+        return { name: p?.login ?? "unknown", index: pid };
+      }),
+    }));
+    // broadcast to all connected clients (this.wss is assumed present on server object)
+    for (const client of this.wss.clients) {
+      try {
+        client.send(JSON.stringify({ type: "update_room", data: JSON.stringify(list), id: 0 }));
+      } catch {}
+    }
   }
 
   close() {
