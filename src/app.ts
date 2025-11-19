@@ -1,6 +1,5 @@
 // src/server.ts
 import { WebSocketServer, type WebSocket } from "ws";
-import crypto from "crypto";
 import dotenv from "dotenv";
 import type {
   AddShipsReq,
@@ -11,38 +10,20 @@ import type {
   RegReq,
   RegRes, RoomListItem
 } from "./server/messageTypes.js";
-import type {PlayerRecord, RoomRecord} from "./models/models.js";
-import {playersById, playersByLogin, rooms} from "./repositories/storage.js";
+import type {RoomRecord} from "./models/models.js";
+import {
+  findPlayerByLogin,
+  loginPlayer,
+  playersById,
+  registerPlayer,
+  rooms
+} from "./repositories/storage.js";
 import {broadcastAll, broadcastToSockets, newId, send} from "./utils/utils.js";
 import {type Coord, coordKey, type Game, games, type ServerShip} from "./models/gameModels.js";
 dotenv.config();
 
 
 const PORT = Number(process.env.PORT || 8080);
-
-/* ---------------------- Player handling --------------------------- */
-
-function registerPlayer(name: string, password: string) {
-  if (playersByLogin.has(name)) throw new Error("Login exists");
-  const id = newId();
-  const rec: PlayerRecord = { id, name: name, password, ws: null, wins: 0 };
-  playersById.set(id, rec);
-  playersByLogin.set(name, id);
-  return rec;
-}
-
-function findPlayerByLogin(name: string): PlayerRecord | null {
-  const id = playersByLogin.get(name);
-  if (!id) return null;
-  return playersById.get(id) ?? null;
-}
-
-function loginPlayer(name: string, password: string) {
-  const rec = findPlayerByLogin(name);
-  if (!rec) throw new Error("No such user");
-  if (rec.password !== password) throw new Error("Invalid password");
-  return rec;
-}
 
 /* ---------------------- Ship utilities ---------------------------- */
 
