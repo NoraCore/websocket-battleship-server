@@ -6,7 +6,7 @@ import type {
   AddShipsReq,
   AttackReq,
   ClientShip,
-  Envelope,
+  Message,
   RandomAttackReq,
   RegReq,
   RegRes, RoomListItem
@@ -72,7 +72,7 @@ const games = new Map<string, Game>(); // roomId -> game
 function newId() { return crypto.randomUUID(); }
 
 function send(ws: WebSocket, type: string, payload: any) {
-  const env: Envelope = { type, data: JSON.stringify(payload), id: 0 };
+  const env: Message = { type, data: JSON.stringify(payload), id: 0 };
   try { ws.send(JSON.stringify(env)); } catch (e) { console.error("send error", e); }
 }
 
@@ -306,9 +306,9 @@ class BattleshipServer {
     (ws as any).context = { playerId: null }; // attach context
     ws.on("message", (raw) => {
       // Each message is expected to be JSON string of Envelope
-      let env: Envelope | null = null;
+      let env: Message | null = null;
       try {
-        env = JSON.parse(raw.toString()) as Envelope;
+        env = JSON.parse(raw.toString()) as Message;
       } catch (e) {
         console.log("RECV RAW:", raw.toString());
         console.log("RESULT: Invalid JSON envelope");
@@ -336,11 +336,11 @@ class BattleshipServer {
     });
   }
 
-  logCommand(env: Envelope) {
+  logCommand(env: Message) {
     console.log("COMMAND:", env );
   }
 
-  handleMessage(ws: WebSocket, env: Envelope) {
+  handleMessage(ws: WebSocket, env: Message) {
     // Validate envelope
     if (!env || typeof env.type !== "string" || env.id !== 0 || typeof env.data !== "string") {
       console.log("RECV RAW:", JSON.stringify(env));

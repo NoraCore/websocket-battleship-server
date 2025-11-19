@@ -3,7 +3,7 @@ export type UUID = string;
 
 /* ----------------------------- Types ----------------------------- */
 
-type Envelope = { type: string; data: string; id: 0 };
+type Message = { type: string; data: string; id: 0 };
 
 type RegReq = { name: string; password: string };
 type RegRes = { name: string | null; index: string | null; error: boolean; errorText: string };
@@ -22,7 +22,7 @@ type AttackReq = { gameId: string; x: number; y: number; indexPlayer: string };
 type RandomAttackReq = { gameId: string; indexPlayer: string };
 
 export type {
-  Envelope,
+  Message,
   RegReq,
   RegRes,
   RoomListItem,
