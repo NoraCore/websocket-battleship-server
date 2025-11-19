@@ -2,33 +2,16 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import crypto from "crypto";
 import dotenv from "dotenv";
-import {botStates, getBotAttack, initBotState} from "./game/bot.js";
+import type {
+  AddShipsReq,
+  AttackReq,
+  ClientShip,
+  Envelope,
+  RandomAttackReq,
+  RegReq,
+  RegRes, RoomListItem
+} from "./server/messageTypes.js";
 dotenv.config();
-
-/**
- * Protocol: envelope { type: string, data: string (JSON), id: 0 }
- * Responses must follow same envelope; id is always 0.
- */
-
-/* ----------------------------- Types ----------------------------- */
-
-type Envelope = { type: string; data: string; id: 0 };
-
-type RegReq = { name: string; password: string };
-type RegRes = { name: string | null; index: string | null; error: boolean; errorText: string };
-
-type RoomListItem = { roomId: string; roomUsers: { name: string; index: string }[] };
-
-type ClientShip = {
-  position: { x: number; y: number };
-  direction: boolean; // true = horizontal (x increases), false = vertical (y increases)
-  length: number;
-  type: "small" | "medium" | "large" | "huge";
-};
-
-type AddShipsReq = { gameId: string; ships: ClientShip[]; indexPlayer: string };
-type AttackReq = { gameId: string; x: number; y: number; indexPlayer: string };
-type RandomAttackReq = { gameId: string; indexPlayer: string };
 
 /* ------------------------- In-memory storage ---------------------- */
 
@@ -36,7 +19,7 @@ const PORT = Number(process.env.PORT || 8080);
 
 type PlayerRecord = {
   id: string; // global server id (uuid)
-  login: string;
+  name: string;
   password: string;
   ws?: WebSocket | null;
   wins: number;
@@ -112,7 +95,7 @@ function broadcastToSockets(sockets: WebSocket[], type: string, payload: any) {
 function registerPlayer(name: string, password: string) {
   if (playersByLogin.has(name)) throw new Error("Login exists");
   const id = newId();
-  const rec: PlayerRecord = { id, login: name, password, ws: null, wins: 0 };
+  const rec: PlayerRecord = { id, name: name, password, ws: null, wins: 0 };
   playersById.set(id, rec);
   playersByLogin.set(name, id);
   return rec;
@@ -727,67 +710,6 @@ class BattleshipServer {
           return;
         }
 
-        case "single_play": {
-          const pid = (ws as any).context.playerId;
-          if (!pid) throw new Error("Not authenticated");
-
-          const gameId = env.id.toString();
-          const game = getGameByRoomId(gameId);
-          if (!game) throw new Error("Game not found");
-
-          // Инициализация состояния бота
-          if (!botStates.has(gameId)) initBotState(gameId);
-
-          // Ход бота
-          const { x, y } = getBotAttack(gameId);
-          const attackerIndex = "1"; // предположим что игрок — 0, бот — 1
-
-          const results = handleAttack(game, attackerIndex, x, y);
-
-          // анализ результатов — обновляем target-mode
-          const state = botStates.get(gameId)!;
-
-          for (const r of results) {
-            if (r.status === "hit") {
-              state.mode = "target";
-              state.hits.push(r.position);
-            }
-
-            if (r.status === "killed") {
-              // корабль добит → обратно в hunt
-              state.mode = "hunt";
-              state.hits = [];
-            }
-          }
-
-          // отправляем результат игроку
-          const room = rooms.get(gameId);
-          const sockets = room.players
-            .map(sid => playersById.get(sid)?.ws)
-            .filter(Boolean) as WebSocket[];
-
-          for (const r of results) {
-            broadcastToSockets(sockets, "attack", {
-              position: r.position,
-              currentPlayer: game.currentPlayerIndex,
-              status: r.status
-            });
-          }
-
-          // Проверяем победу
-          const playerIndex = "0";
-          if (game.occupied[playerIndex].size === 0) {
-            broadcastToSockets(sockets, "finish", { winPlayer: "1" }); // бот победил
-            games.delete(gameId);
-            rooms.delete(gameId);
-            botStates.delete(gameId);
-            return;
-          }
-
-          return;
-        }
-
-
         default:
           send(ws, "reg", { name: null, index: null, error: true, errorText: "Unknown command" });
           console.log("RESULT: Unknown command", env.type);
@@ -805,7 +727,7 @@ class BattleshipServer {
       roomId: r.id,
       roomUsers: r.players.map(pid => {
         const p = playersById.get(pid)!;
-        return { name: p.login, index: pid };
+        return { name: p.name, index: pid };
       })
     }));
     broadcastAll("update_room", list, this.wss);
@@ -813,7 +735,7 @@ class BattleshipServer {
   }
 
   broadcastWinners() {
-    const winners = Array.from(playersById.values()).map(p => ({ name: p.login, wins: p.wins }));
+    const winners = Array.from(playersById.values()).map(p => ({ name: p.name, wins: p.wins }));
     broadcastAll("update_winners", winners, this.wss);
     console.log("RESULT: update_winners broadcasted");
   }
