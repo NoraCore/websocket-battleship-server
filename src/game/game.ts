@@ -1,13 +1,6 @@
 import type {ClientShip} from "../server/messageTypes.js";
 import {type Coord, coordKey, type Game, games} from "../models/gameModels.js";
 
-
-/**
- * Per-game player session id mapping:
- * When a game starts we assign per-game indices "0" and "1" (strings) to players.
- * indexPlayer used in protocol is that per-game index.
- */
-
 export const BOARD_SIZE = 10; // 0..9
 
 export function expandClientShip(s: ClientShip): Coord[] {
@@ -27,12 +20,20 @@ export function validateShipsPlacement(ships: ClientShip[]) {
   // check bounds, integer coords, no overlap, reasonable total cells
   const occupied = new Set<string>();
   for (const s of ships) {
-    if (!s || typeof s.length !== "number" || !s.position) throw new Error("Invalid ship format");
+    if (!s || typeof s.length !== "number" || !s.position) {
+      throw new Error("Invalid ship format");
+    }
     const coords = expandClientShip(s);
-    if (coords.length !== s.length) throw new Error("Invalid length expansion");
+    if (coords.length !== s.length) {
+      throw new Error("Invalid length expansion");
+    }
     for (const c of coords) {
-      if (!Number.isInteger(c.x) || !Number.isInteger(c.y)) throw new Error("Coordinates must be integers");
-      if (c.x < 0 || c.x >= BOARD_SIZE || c.y < 0 || c.y >= BOARD_SIZE) throw new Error(`Ship out of bounds: ${c} in ${ships}`);
+      if (!Number.isInteger(c.x) || !Number.isInteger(c.y)) {
+        throw new Error("Coordinates must be integers");
+      }
+      if (c.x < 0 || c.x >= BOARD_SIZE || c.y < 0 || c.y >= BOARD_SIZE) {
+        throw new Error(`Ship out of bounds: ${c} in ${ships}`);
+      }
       const key = coordKey(c);
       if (occupied.has(key)) throw new Error("Ships overlap");
       occupied.add(key);
