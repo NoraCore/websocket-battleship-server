@@ -17,161 +17,29 @@ import {
   rooms
 } from "./repositories/storage.js";
 import {broadcastAll, broadcastToSockets, newId, send} from "./utils/utils.js";
-import {type Coord, coordKey, type Game, games, type ServerShip} from "./models/gameModels.js";
-import {BOARD_SIZE, expandClientShip, validateShipsPlacement} from "./game/game.js";
+import {
+  buildGameForRoom,
+  type Coord,
+  coordKey,
+  type Game,
+  games,
+  getGameByRoomId, serverIdToSessionIndex,
+  type ServerShip
+} from "./models/gameModels.js";
+import {BOARD_SIZE, expandClientShip, handleAttack, validateShipsPlacement} from "./game/game.js";
 
 dotenv.config();
 
 
 const PORT = Number(process.env.PORT || 8080);
 
-/* ---------------------- Room/Game lifecycle ----------------------- */
-
-function buildGameForRoom(room: RoomRecord): Game {
-  const id = room.id;
-  const game: Game = {
-    id,
-    players: [],
-    ships: { "0": [], "1": [] },
-    occupied: { "0": new Map(), "1": new Map() },
-    tried: { "0": new Set(), "1": new Set() },
-    currentPlayerIndex: "0"
-  };
-  // assign session indices in order players array
-  for (let i = 0; i < room.players.length; i++) {
-    const serverId = room.players[i];
-    const sessionIndex = String(i);
-    game.players.push({ serverId, sessionIndex });
-  }
-  games.set(id, game);
-  return game;
-}
-
-function getGameByRoomId(roomId: string): Game | undefined {
-  return games.get(roomId);
-}
-
-/* helper: map server player id -> sessionIndex in a game */
-function serverIdToSessionIndex(game: Game, serverId: string): string | undefined {
-  const p = game.players.find(x => x.serverId === serverId);
-  return p?.sessionIndex;
-}
-
-/* ----------------------- Attack logic ---------------------------- */
-
-/**
- * checkAttack(game, attackerSessionIndex, x,y)
- * returns array of attack result messages to broadcast to both players.
- * It will mutate game ships/occupied accordingly.
- *
- * Result message shape per spec:
- * {
- *   type: "attack",
- *   data: { position: {x,y}, currentPlayer: <indexPlayer>, status: "miss"|"killed"|"shot" }
- * }
- */
-function handleAttack(game: Game, attackerIndex: string, x: number, y: number) {
-  const opponentIndex = attackerIndex === "0" ? "1" : "0";
-  const posKey = `${x},${y}`;
-
-  if (game.tried[attackerIndex].has(posKey)) {
-    return [{ position: { x, y }, currentPlayer: attackerIndex, status: "repeat" }];
-  }
-
-  game.tried[attackerIndex].add(posKey);
-
-  const shipMap = game.occupied[opponentIndex];
-  const ship = shipMap.get(posKey);
-
-  if (!ship) {
-    game.currentPlayerIndex = opponentIndex;
-    return [{ position: { x, y }, currentPlayer: attackerIndex, status: "miss" }];
-  }
-
-  // ---- HIT ----
-  const idx = ship.cells.findIndex(c => c.x === x && c.y === y);
-  if (idx === -1) {
-    game.currentPlayerIndex = opponentIndex;
-    return [{ position: { x, y }, currentPlayer: attackerIndex, status: "miss" }];
-  }
-
-  ship.cells.splice(idx, 1);
-  shipMap.delete(posKey);
-
-  if (ship.cells.length > 0) {
-    return [{ position: { x, y }, currentPlayer: attackerIndex, status: "shot" }];
-  }
-
-  // ---- KILLED ----
-  // ship is fully destroyed now
-
-  // 1) Collect ALL killed cells of this ship
-  const killedCells = ship.originalCells.map(c => ({
-    position: c,
-    currentPlayer: attackerIndex,
-    status: "killed" as const
-  }));
-
-  // 2) Generate surrounding misses, but skip the ship's own cells
-  const surroundMsgs: { position: Coord; currentPlayer: string; status: "miss" }[] = [];
-  const shipCellKeys = new Set(ship.originalCells.map(c => `${c.x},${c.y}`));
-  const visited = new Set<string>();
-
-  for (const oc of ship.originalCells) {
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        const cx = oc.x + dx;
-        const cy = oc.y + dy;
-
-        if (cx < 0 || cy < 0 || cx >= BOARD_SIZE || cy >= BOARD_SIZE) continue;
-
-        const key = `${cx},${cy}`;
-        if (visited.has(key)) continue;
-        visited.add(key);
-
-        // Skip actual ship cells — fixing BUG #1
-        if (shipCellKeys.has(key)) {
-          continue;
-        }
-
-        // Skip cells that are occupied by alive ships
-        if (shipMap.has(key)) {
-          continue;
-        }
-
-        surroundMsgs.push({
-          position: { x: cx, y: cy },
-          currentPlayer: attackerIndex,
-          status: "miss"
-        });
-
-        game.tried[attackerIndex].add(key);
-      }
-    }
-  }
-
-  // ---- WIN CHECK ----
-  const opponentRemaining = shipMap.size;
-
-  if (opponentRemaining === 0) {
-    return [
-      ...killedCells,   // FIX #2
-      ...surroundMsgs
-    ];
-  }
-
-  // attacker keeps turn
-  return [
-    ...killedCells,     // FIX #2
-    ...surroundMsgs
-  ];
-}
 
 
 /* ---------------------- Server (transport) ------------------------ */
 
 class BattleshipServer {
   wss: WebSocketServer;
+
   constructor(port: number) {
     this.wss = new WebSocketServer({ port });
     this.wss.on("connection", (ws, req) => this.onConnection(ws));

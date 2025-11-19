@@ -1,4 +1,5 @@
 import type {ClientShip} from "../server/messageTypes.js";
+import type {RoomRecord} from "./models.js";
 
 
 export type Coord = { x: number; y: number };
@@ -22,3 +23,33 @@ export type Game = {
 
 
 export const games = new Map<string, Game>(); // roomId -> game
+
+export function getGameByRoomId(roomId: string): Game | undefined {
+  return games.get(roomId);
+}
+
+export function buildGameForRoom(room: RoomRecord): Game {
+  const id = room.id;
+  const game: Game = {
+    id,
+    players: [],
+    ships: { "0": [], "1": [] },
+    occupied: { "0": new Map(), "1": new Map() },
+    tried: { "0": new Set(), "1": new Set() },
+    currentPlayerIndex: "0"
+  };
+  // assign session indices in order players array
+  for (let i = 0; i < room.players.length; i++) {
+    const serverId = room.players[i];
+    const sessionIndex = String(i);
+    game.players.push({ serverId, sessionIndex });
+  }
+  games.set(id, game);
+  return game;
+}
+
+/* helper: map server player id -> sessionIndex in a game */
+export function serverIdToSessionIndex(game: Game, serverId: string): string | undefined {
+  const p = game.players.find(x => x.serverId === serverId);
+  return p?.sessionIndex;
+}
