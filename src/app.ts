@@ -13,63 +13,12 @@ import type {
 } from "./server/messageTypes.js";
 import type {PlayerRecord, RoomRecord} from "./models/models.js";
 import {playersById, playersByLogin, rooms} from "./repositories/storage.js";
+import {broadcastAll, broadcastToSockets, newId, send} from "./utils/utils.js";
+import {type Coord, coordKey, type Game, games, type ServerShip} from "./models/gameModels.js";
 dotenv.config();
 
 
 const PORT = Number(process.env.PORT || 8080);
-
-/* --------------------------- Game model --------------------------- */
-
-/**
- * Per-game player session id mapping:
- * When a game starts we assign per-game indices "0" and "1" (strings) to players.
- * indexPlayer used in protocol is that per-game index.
- */
-
-type Coord = { x: number; y: number };
-function coordKey(c: Coord) { return `${c.x},${c.y}`; }
-
-type ServerShip = {
-  id: string;
-  type: ClientShip["type"];
-  cells: Coord[]; // remaining cells (we will remove coords when hit)
-  originalCells: Coord[]; // full set for reporting start_game
-};
-
-type Game = {
-  id: string; // same as room id for simplicity
-  players: { serverId: string; sessionIndex: string }[]; // sessionIndex "0"|"1"
-  ships: Record<string, ServerShip[]>; // sessionIndex -> ships
-  occupied: Record<string, Map<string, ServerShip>>; // sessionIndex -> map coordKey->ship (occupied by that player's ships)
-  tried: Record<string, Set<string>>; // sessionIndex -> coords that were targeted (string keys)
-  currentPlayerIndex: string; // "0" or "1" (sessionIndex who should shoot)
-};
-
-/* runtime */
-const games = new Map<string, Game>(); // roomId -> game
-
-/* -------------------------- Utilities ----------------------------- */
-
-function newId() { return crypto.randomUUID(); }
-
-function send(ws: WebSocket, type: string, payload: any) {
-  const env: Message = { type, data: JSON.stringify(payload), id: 0 };
-  try { ws.send(JSON.stringify(env)); } catch (e) { console.error("send error", e); }
-}
-
-function broadcastAll(type: string, payload: any, wss: WebSocketServer) {
-  const raw = JSON.stringify({ type, data: JSON.stringify(payload), id: 0 });
-  for (const c of wss.clients) {
-    try { c.send(raw); } catch {}
-  }
-}
-
-function broadcastToSockets(sockets: WebSocket[], type: string, payload: any) {
-  const raw = JSON.stringify({ type, data: JSON.stringify(payload), id: 0 });
-  for (const s of sockets) {
-    try { s.send(raw); } catch {}
-  }
-}
 
 /* ---------------------- Player handling --------------------------- */
 
