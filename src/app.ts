@@ -6,8 +6,6 @@ dotenv.config();
 
 const PORT = Number(process.env.PORT || 8080);
 
-/* ----------------------------- Boot ------------------------------ */
-
 const server = new BattleshipServer(PORT);
 
 process.on("SIGINT", () => {
