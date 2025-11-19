@@ -11,31 +11,12 @@ import type {
   RegReq,
   RegRes, RoomListItem
 } from "./server/messageTypes.js";
+import type {PlayerRecord, RoomRecord} from "./models/models.js";
+import {playersById, playersByLogin, rooms} from "./repositories/storage.js";
 dotenv.config();
 
-/* ------------------------- In-memory storage ---------------------- */
 
 const PORT = Number(process.env.PORT || 8080);
-
-type PlayerRecord = {
-  id: string; // global server id (uuid)
-  name: string;
-  password: string;
-  ws?: WebSocket | null;
-  wins: number;
-};
-
-const playersById = new Map<string, PlayerRecord>();
-const playersByLogin = new Map<string, string>(); // login -> id
-
-type RoomRecord = {
-  id: string;
-  players: string[]; // server player ids in room (max 2)
-  state: "waiting" | "placing" | "playing" | "finished";
-  // game stored elsewhere
-};
-
-const rooms = new Map<string, RoomRecord>();
 
 /* --------------------------- Game model --------------------------- */
 
