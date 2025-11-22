@@ -1,0 +1,34 @@
+{
+
+  "compilerOptions": {
+    "module": "nodenext",
+    "target": "esnext",
+    "types": ["node"],
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+    "noUncheckedIndexedAccess": true,
+//    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*"]
+}
+//{
+//  "compilerOptions": {
+//    "noEmit": true, // Optional - see note below
+//    "target": "esnext",
+//    "module": "nodenext",
+//    "rewriteRelativeImportExtensions": true,
+//    "erasableSyntaxOnly": true,
+//    "verbatimModuleSyntax": true,
+//    "outDir": "dist",
+//    "sourceMap": true
+//  },
+//  "include": ["src/**/*"]
+//}

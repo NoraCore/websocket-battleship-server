@@ -1,0 +1,39 @@
+{
+  "name": "websocket-battleship-server",
+  "version": "1.0.0",
+  "description": "",
+  "homepage": "https://github.com/NoraCore/websocket-battleship-server#readme",
+  "bugs": {
+    "url": "https://github.com/NoraCore/websocket-battleship-server/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NoraCore/websocket-battleship-server.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "src/app.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node start:prod",
+    "start:dev": "cross-env NODE_ENV=development && cross-env PORT=3000 npx tsx watch src/app.ts",
+    "start:prod": "npm run build && cross-env NODE_ENV=production && cross-env PORT=3000 node dist/app.js",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@jest/globals": "^30.2.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.10.1",
+    "@types/ws": "^8.18.1",
+    "cross-env": "^10.1.0",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.5",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.20.6",
+    "ws": "^8.18.3"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3"
+  }
+}
